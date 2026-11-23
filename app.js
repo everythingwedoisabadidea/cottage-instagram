@@ -80,6 +80,48 @@
     const s = String(v ?? '').trim();
     return (s === '' || /^\d+$/.test(s)) ? String((Number(s) || 0) + 1) : s;
   }
+  /* ---------- 날짜 ---------- */
+  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const toLocalISO = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const dateVal = p => { const t = Date.parse(p.date || ''); return isNaN(t) ? -Infinity : t; };
+  function relTime(iso) {
+    const t = Date.parse(iso || '');
+    if (isNaN(t)) return '';
+    const d = new Date(t), now = new Date(), diff = (now - d) / 1000;
+    const pl = (n, u) => `${n} ${u}${n === 1 ? '' : 's'} ago`;
+    if (diff >= 0 && diff < 60) return 'Just now';
+    if (diff >= 0 && diff < 3600) return pl(Math.floor(diff / 60), 'minute');
+    if (diff >= 0 && diff < 86400) return pl(Math.floor(diff / 3600), 'hour');
+    if (diff >= 0 && diff < 7 * 86400) return pl(Math.floor(diff / 86400), 'day');
+    const md = `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+    return d.getFullYear() === now.getFullYear() ? md : `${md}, ${d.getFullYear()}`;
+  }
+  // 예전 데이터의 '작성 시간' 글자에서 날짜를 추측 (2 hours ago, November 2, 3일 전 등)
+  function guessDate(text) {
+    const s = String(text || '').trim().toLowerCase(), now = new Date();
+    if (!s) return '';
+    if (/just now|^now$|방금/.test(s)) return toLocalISO(now);
+    const units = { minute: 6e4, min: 6e4, m: 6e4, '분': 6e4, hour: 36e5, hr: 36e5, h: 36e5, '시간': 36e5, day: 864e5, d: 864e5, '일': 864e5, week: 6048e5, w: 6048e5, '주': 6048e5 };
+    let m = s.match(/^(\d+)\s*(minute|min|hour|hr|day|week|분|시간|일|주|m|h|d|w)s?\s*(ago|전)?$/);
+    if (m && units[m[2]]) return toLocalISO(new Date(now - Number(m[1]) * units[m[2]]));
+    m = s.match(/^(?:(\d{4})년\s*)?(\d{1,2})월\s*(\d{1,2})일/);
+    if (m) {
+      const d = new Date(Number(m[1] || now.getFullYear()), Number(m[2]) - 1, Number(m[3]), 12);
+      if (!m[1] && d > now) d.setFullYear(d.getFullYear() - 1);
+      return toLocalISO(d);
+    }
+    const hasYear = /\d{4}/.test(s);
+    const t = Date.parse(hasYear ? s : `${s}, ${now.getFullYear()}`);
+    if (!isNaN(t)) {
+      const d = new Date(t);
+      if (!hasYear && d > now) d.setFullYear(d.getFullYear() - 1);
+      return toLocalISO(d);
+    }
+    return '';
+  }
+  // 최신 날짜가 위로. 날짜 없는 게시물은 기존 순서대로 맨 아래
+  const sortPosts = () => state.posts.sort((a, b) => dateVal(b) - dateVal(a));
+
   const shown = v => { const s = String(v ?? '').trim(); return s !== '' && s !== '0'; };
   const find = id => state.posts.find(p => p.id === id);
   const author = p => p.author.useProfile
@@ -111,7 +153,7 @@
   function newPost() {
     return {
       id: uid(), author: { useProfile: true, username: '', avatar: '', verified: false },
-      location: '', time: 'Just now', ratio: '4:5', images: [], caption: '',
+      location: '', date: toLocalISO(new Date()), time: '', ratio: '4:5', images: [], caption: '',
       likes: '', commentCount: '', reposts: '', shares: '', comments: []
     };
   }
@@ -127,11 +169,13 @@
       const base = newPost();
       return {
         ...base, ...p,
+        date: p.date || guessDate(p.time),
         author: { ...base.author, ...(p.author || {}) },
         images: Array.isArray(p.images) ? p.images : [],
         comments: Array.isArray(p.comments) ? p.comments.map(c => ({ id: uid(), ...c })) : []
       };
     });
+    out.posts.sort((a, b) => dateVal(b) - dateVal(a));
     return out;
   }
   async function fetchData() {
@@ -224,7 +268,7 @@
       ${cap ? `<div class="caption ${clamp ? 'clamp' : ''}"><b data-act="author" data-id="${p.id}">${esc(a.username)}</b> ${rich(cap)}</div>
         ${clamp ? `<button class="more-btn" data-act="expand" data-id="${p.id}">more</button>` : ''}` : ''}
       ${shown(cc) ? `<button class="vc" data-act="comments" data-id="${p.id}">${String(cc).trim() === '1' ? 'View 1 comment' : `View all ${fmt(cc)} comments`}</button>` : ''}
-      ${p.time ? `<div class="ptime">${esc(p.time)}</div>` : ''}
+      ${(String(p.time || '').trim() || relTime(p.date)) ? `<div class="ptime">${esc(String(p.time || '').trim() || relTime(p.date))}</div>` : ''}
     </article>`;
   }
 
@@ -581,7 +625,8 @@
         field('사진 비율', select(d, 'ratio', [['4:5', '4:5 세로'], ['1:1', '1:1 정사각형'], ['3:4', '3:4 세로'], ['1.91:1', '1.91:1 가로']])),
         field('내용', area(d, 'caption', '#해시태그, @멘션은 파란색으로 표시돼요', 5)),
         field('위치', text(d, 'location', '예: 서울 성수동 (비우면 숨김)')),
-        field('작성 시간', text(d, 'time', '예: 3 hours ago / November 17 / March 2, 2025'), '적은 글자 그대로 표시돼요.')),
+        field('작성 날짜·시간', dateInput(d), '게시물은 이 날짜 기준으로 최신순 자동 정렬돼요.'),
+        field('표시 문구 (선택)', text(d, 'time', '비우면 날짜로 자동 표시 (2 hours ago, November 2…)'), '여기에 적으면 날짜 대신 이 글자가 그대로 보여요. 정렬은 위의 날짜를 따라요.')),
       sec('반응 수',
         h('div', { class: 'grid2' },
           field('좋아요', text(d, 'likes', '0')),
@@ -590,11 +635,7 @@
           field('공유', text(d, 'shares', '0'))),
         h('p', { class: 'note' }, '숫자만 적으면 12400 → 12.4K, 1500000 → 1.5M처럼 자동 표시돼요. 글자를 섞어 적으면 그대로 표시돼요. 비우거나 0이면 숫자를 숨겨요.')),
       sec('댓글', commentsEditor(d)),
-      !isNew && sec('순서 · 삭제',
-        h('div', { class: 'row' },
-          btn('맨 위로', () => movePost(id, 'top')),
-          btn('위로', () => movePost(id, -1)),
-          btn('아래로', () => movePost(id, 1))),
+      !isNew && sec('삭제',
         h('div', { class: 'row' }, confirmBtn('이 게시물 삭제', () => {
           state.posts = state.posts.filter(p => p.id !== id); commit(); closeOverlay(m); toast('삭제했어요');
         }))));
@@ -602,15 +643,13 @@
     m = modal(isNew ? '새 게시물' : '게시물 수정', body, () => {
       if (isNew) state.posts.unshift(d);
       else { const i = state.posts.findIndex(p => p.id === id); if (i >= 0) state.posts[i] = d; else state.posts.unshift(d); }
-      commit(); toast(isNew ? '게시물을 올렸어요' : '저장했어요');
+      sortPosts(); commit(); toast(isNew ? '게시물을 올렸어요' : '저장했어요');
     });
   }
-  function movePost(id, dir) {
-    const i = state.posts.findIndex(p => p.id === id);
-    if (i < 0) return;
-    if (dir === 'top') state.posts.unshift(...state.posts.splice(i, 1));
-    else move(state.posts, i, dir);
-    commit(); toast('순서를 바꿨어요');
+  function dateInput(d) {
+    const inp = h('input', { type: 'datetime-local', value: d.date || '', oninput: e => { d.date = e.target.value; } });
+    return h('div', { class: 'row', style: 'margin:0;flex-wrap:nowrap' }, inp,
+      btn('지금', () => { d.date = toLocalISO(new Date()); inp.value = d.date; }));
   }
 
   /* ---------- 프로필 · 설정 편집 ---------- */

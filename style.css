@@ -183,7 +183,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .f { display: block; margin-bottom: 10px; }
 .fl { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; }
 .f small { display: block; color: var(--e-sub); font-size: 12px; margin-top: 4px; }
-.ed input[type="text"], .ed textarea, .ed select {
+.ed input[type="text"], .ed input[type="datetime-local"], .ed textarea, .ed select {
   width: 100%; border: 1px solid var(--e-line); border-radius: 10px; padding: 10px 12px;
   font: inherit; font-size: 16px; background: var(--e-bg); color: var(--e-fg); outline: none;
 }
@@ -196,7 +196,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .grid3 { display: grid; grid-template-columns: 1.6fr 1fr 1fr; gap: 8px; margin-top: 8px; }
 .grid3 .f { margin: 0; }
 .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
-.row input[type="text"] { flex: 1; min-width: 0; width: auto; }
+.row input[type="text"], .row input[type="datetime-local"] { flex: 1; min-width: 0; width: auto; }
 .row .sbtn { flex: none; }
 .sbtn { background: var(--e-soft); color: var(--e-fg); border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 600; }
 .sbtn.danger { color: #d32f2f; }
