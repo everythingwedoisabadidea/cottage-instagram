@@ -196,7 +196,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .grid3 { display: grid; grid-template-columns: 1.6fr 1fr 1fr; gap: 8px; margin-top: 8px; }
 .grid3 .f { margin: 0; }
 .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
-.row input[type="text"] { flex: 1; min-width: 150px; width: auto; }
+.row input[type="text"] { flex: 1; min-width: 0; width: auto; }
+.row .sbtn { flex: none; }
 .sbtn { background: var(--e-soft); color: var(--e-fg); border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 600; }
 .sbtn.danger { color: #d32f2f; }
 .sbtn.wide { width: 100%; margin-top: 8px; padding: 11px; }

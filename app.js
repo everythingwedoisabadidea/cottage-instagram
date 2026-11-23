@@ -22,7 +22,7 @@
   const isEditing = () => EDIT && !preview;
 
   const svgUri = s => 'data:image/svg+xml,' + encodeURIComponent(s);
-  const DEFAULT_AVATAR = svgUri('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#dbdbdb"/><circle cx="50" cy="40" r="18" fill="#fff"/><path d="M15 95c4-20 18-30 35-30s31 10 35 30z" fill="#fff"/></svg>');
+  const DEFAULT_AVATAR = svgUri('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#dbdbdb"/><circle cx="50" cy="39" r="18" fill="#fff"/><path d="M13 101c2-21 17-34 37-34s35 13 37 34z" fill="#fff"/></svg>');
   const EMPTY_IMG = svgUri('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#e6e6e6"/><path d="M30 64l13-16 10 12 7-8 12 12z" fill="#c4c4c4"/><circle cx="62" cy="38" r="6" fill="#c4c4c4"/></svg>');
 
   const FALLBACK = {
@@ -62,7 +62,8 @@
 
   /* ---------- 유틸 ---------- */
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const rich = s => esc(s).replace(/([#@][\w가-힣.]+)/g, '<span class="tag">$1</span>');
+  const rich = s => String(s ?? '').split(/([#@][\w가-힣.]+)/g)
+    .map((part, i) => i % 2 ? `<span class="tag">${esc(part)}</span>` : esc(part)).join('');
   const trim1 = x => String(Math.floor(x * 10) / 10);
   function fmt(v) {
     const s = String(v ?? '').trim();
@@ -505,8 +506,8 @@
       if (!d.comments.length) wrap.append(h('div', { class: 'note' }, '댓글이 없어요.'));
       d.comments.forEach((c, i) => wrap.append(h('div', { class: 'crow' },
         imgInput(c, 'avatar', { round: true, compact: true, max: 200 }),
-        h('div', { class: 'grid3' },
-          field('아이디', text(c, 'username', 'user_01')),
+        h('div', { style: 'margin-top:8px' }, field('아이디', usernameInput(c, 'username'))),
+        h('div', { class: 'grid2' },
           field('시간', text(c, 'time', '예: 2h, 3d, 1w')),
           field('좋아요', text(c, 'likes', '0'))),
         area(c, 'text', '댓글 내용', 2),
@@ -516,7 +517,7 @@
           btn('▼', () => { move(d.comments, i, 1); draw(); }),
           btn('삭제', () => { d.comments.splice(i, 1); draw(); }, 'danger')))));
       wrap.append(
-        btn('＋ 댓글 추가', () => { d.comments.push({ id: uid(), username: '', avatar: '', verified: false, text: '', time: 'now', likes: '' }); draw(); }, 'wide'),
+        btn('＋ 댓글 추가', () => { d.comments.push({ id: uid(), username: randomUsername(), avatar: '', verified: false, text: '', time: 'now', likes: '' }); draw(); }, 'wide'),
         btn('＋ 내 계정으로 댓글 추가', () => {
           const pr = state.profile;
           d.comments.push({ id: uid(), username: pr.username, avatar: pr.avatar, verified: pr.verified, text: '', time: 'now', likes: '' }); draw();
@@ -524,6 +525,32 @@
     };
     draw();
     return wrap;
+  }
+
+
+  /* ---------- 미국식 아이디 자동 생성 ---------- */
+  const FIRST = ['jake','tyler','ryan','josh','matt','chris','kyle','brandon','austin','ethan','logan','dylan','connor','mason','hunter','cody','zach','nick','drew','luke','emily','madison','ashley','brooke','kayla','hailey','sarah','jess','lauren','taylor','abby','olivia','chloe','grace','megan','sydney','paige','kenzie','savannah','avery'];
+  const LAST = ['miller','johnson','smith','brown','davis','wilson','anderson','thomas','moore','taylor','jackson','white','harris','martin','thompson','garcia','clark','lewis','walker','hall','allen','young','king','wright','scott','green','baker','adams','nelson','carter','parker','evans','collins','murphy','cooper','reed','bailey','hayes','brooks','ward'];
+  const WORD = ['vibes','daily','irl','wav','szn','xo','official','life','world','things','fits','eats','snaps','travels','tbh','ok','lol','core','club','stuff'];
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  const rnum = () => pick([String(Math.floor(Math.random() * 99) + 1).padStart(2, '0'), String(Math.floor(Math.random() * 30) + 95).slice(-2), '0' + (Math.floor(Math.random() * 9) + 1), String(Math.floor(Math.random() * 900) + 100)]);
+  const stretch = w => w + w.slice(-1).repeat(1 + Math.floor(Math.random() * 2));
+  function randomUsername() {
+    const f = pick(FIRST), l = pick(LAST), w = pick(WORD);
+    const patterns = [
+      () => `${f}.${l}`, () => `${f}_${l}`, () => `${f}${l}${rnum()}`, () => `${f}.${l[0]}`,
+      () => `${f}${l[0]}_`, () => `_${f}${l}`, () => `${stretch(f)}`, () => `${stretch(f)}.${rnum()}`,
+      () => `its${f}${pick(['', 'x', 'xo', '.'])}`, () => `${f}.${w}`, () => `${f}${w}`, () => `${f}_${l}${rnum()}`,
+      () => `lil${f}${pick(['', 'y', 'ie'])}`, () => `${f}.${l}.${rnum()}`, () => `x${f}${l[0]}x`, () => `${f}doesthings`,
+      () => `${l}.${f}`, () => `${f}${pick(['_', '.', ''])}${rnum()}`, () => `not${f}`, () => `${f}${pick(['ss', 'zz', 'yy'])}_`
+    ];
+    return pick(patterns)().replace(/\.\.+/g, '.').slice(0, 30);
+  }
+  // 아이디 입력칸 + 🎲 버튼
+  function usernameInput(o, k, after) {
+    const inp = text(o, k, '예: jake.miller');
+    const dice = btn('🎲 랜덤', () => { o[k] = randomUsername(); inp.value = o[k]; after && after(); });
+    return h('div', { class: 'row', style: 'margin:0;flex-wrap:nowrap' }, inp, dice);
   }
 
   /* ---------- 게시물 편집 ---------- */
@@ -536,8 +563,9 @@
       if (d.author.useProfile) {
         authorBox.append(h('p', { class: 'note' }, `프로필 계정(@${state.profile.username})으로 표시돼요. 프로필 그리드에도 나타나고, 프로필을 바꾸면 함께 바뀌어요.`));
       } else {
+        if (!d.author.username) d.author.username = randomUsername();
         authorBox.append(
-          field('작성자 아이디', text(d.author, 'username', '예: friend_01')),
+          field('작성자 아이디', usernameInput(d.author, 'username')),
           field('작성자 프로필 사진', imgInput(d.author, 'avatar', { round: true })),
           check(d.author, 'verified', '인증 배지 표시'),
           h('p', { class: 'note' }, '다른 계정의 게시물은 피드에만 보이고, 프로필 그리드에는 나오지 않아요.'));
@@ -606,7 +634,7 @@
     const d = clone(state.profile), s = clone(state.settings);
     const body = h('div', {},
       sec('계정',
-        field('아이디', text(d, 'username')),
+        field('아이디', usernameInput(d, 'username')),
         field('이름', text(d, 'name')),
         field('프로필 사진', imgInput(d, 'avatar', { round: true })),
         check(d, 'verified', '인증 배지'),
