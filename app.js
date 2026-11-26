@@ -50,6 +50,7 @@
     reels: sv('<rect x="3" y="3" width="18" height="18" rx="5"/><path d="M3 8.5h18M9 3l3 5.5M14.5 3l3 5.5"/><path d="M10 12v5.5l4.8-2.75z"/>'),
     more: sv('<circle cx="5" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="19" cy="12" r="1.2" fill="currentColor"/>'),
     back: sv('<path d="M15 4 7 12l8 8"/>'),
+    chev: sv('<path d="M9 5l7 7-7 7"/>'),
     menu: sv('<path d="M3.5 6h17M3.5 12h17M3.5 18h17"/>'),
     grid: sv('<rect x="3" y="3" width="18" height="18" rx="1.5"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/>'),
     tag: sv('<rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="12" cy="10" r="3"/><path d="M6.5 20.5c1-3 3-4.5 5.5-4.5s4.5 1.5 5.5 4.5"/>'),
@@ -123,7 +124,17 @@
   const sortPosts = () => state.posts.sort((a, b) => dateVal(b) - dateVal(a));
 
   const shown = v => { const s = String(v ?? '').trim(); return s !== '' && s !== '0'; };
-  const find = id => state.posts.find(p => p.id === id);
+  const find = id => state.posts.find(p => p.id === id) || state.ads.find(p => p.id === id);
+  const RATIO = { '4:5': '4/5', '1:1': '1/1', '1.91:1': '1.91/1', '3:4': '3/4' };
+  const clampN = (v, lo, hi, dflt) => { const n = Number(v); return isNaN(n) ? dflt : Math.min(hi, Math.max(lo, n)); };
+  // 사진 1장 = { src, x, y, z }  (x, y: 보이는 위치 %, z: 확대 배율)
+  function imgObj(e) {
+    if (typeof e === 'string') return { src: e, x: 50, y: 50, z: 1 };
+    e = e || {};
+    return { src: e.src || '', x: clampN(e.x, 0, 100, 50), y: clampN(e.y, 0, 100, 50), z: clampN(e.z, 1, 4, 1) };
+  }
+  const cropStyle = o => `object-position:${o.x}% ${o.y}%;transform-origin:${o.x}% ${o.y}%;transform:scale(${o.z})`;
+  const imgTag = (e, extra = '') => { const o = imgObj(e); return `<img src="${esc(o.src || EMPTY_IMG)}" alt="" draggable="false" style="${cropStyle(o)}" ${extra}>`; };
   const author = p => p.author.useProfile
     ? { username: state.profile.username, avatar: state.profile.avatar, verified: state.profile.verified }
     : p.author;
@@ -157,12 +168,20 @@
       likes: '', commentCount: '', reposts: '', shares: '', comments: []
     };
   }
+  function newAd() {
+    return {
+      ...newPost(), ad: true, after: 2, time: '', date: '',
+      author: { useProfile: false, username: 'maplehouse.co', avatar: '', verified: false },
+      cta: 'Learn more', ctaStyle: 'plain'
+    };
+  }
   function normalize(d) {
     d = d && typeof d === 'object' ? d : {};
     const out = {
       settings: { ...FALLBACK.settings, ...(d.settings || {}) },
       profile: { ...FALLBACK.profile, ...(d.profile || {}) },
-      posts: Array.isArray(d.posts) ? d.posts : []
+      posts: Array.isArray(d.posts) ? d.posts : [],
+      ads: Array.isArray(d.ads) ? d.ads : []
     };
     if (!Array.isArray(out.profile.highlights)) out.profile.highlights = [];
     out.posts = out.posts.map(p => {
@@ -171,8 +190,17 @@
         ...base, ...p,
         date: p.date || guessDate(p.time),
         author: { ...base.author, ...(p.author || {}) },
-        images: Array.isArray(p.images) ? p.images : [],
+        images: Array.isArray(p.images) ? p.images.map(imgObj) : [],
         comments: Array.isArray(p.comments) ? p.comments.map(c => ({ id: uid(), ...c })) : []
+      };
+    });
+    out.ads = out.ads.map(a => {
+      const base = newAd();
+      return {
+        ...base, ...a, ad: true,
+        author: { ...base.author, ...(a.author || {}), useProfile: false },
+        images: Array.isArray(a.images) ? a.images.map(imgObj) : [],
+        comments: Array.isArray(a.comments) ? a.comments.map(c => ({ id: uid(), ...c })) : []
       };
     });
     out.posts.sort((a, b) => dateVal(b) - dateVal(a));
@@ -220,7 +248,7 @@
   const disclaimer = '<div class="disclaimer">Unofficial mock-up made for fun. Not affiliated with any real service.</div>';
 
   function feedPage() {
-    const posts = state.posts.length ? state.posts.map(postHTML).join('')
+    const posts = state.posts.length || state.ads.length ? feedItems().map(postHTML).join('')
       : `<div class="empty">No posts yet.${isEditing() ? '<br>(위의 [＋ 새 게시물]로 올려 보세요)' : ''}</div>`;
     return `<header class="topbar">
         <div class="logo">${esc(state.settings.title)}</div>
@@ -229,16 +257,27 @@
       <main>${posts}</main>${disclaimer}`;
   }
 
+  // 광고는 'N번째 게시물 다음' 자리에 끼워 넣음
+  function feedItems() {
+    const posts = state.posts, ads = state.ads, out = [];
+    const slot = a => Math.max(0, parseInt(a.after, 10) || 0);
+    const at = n => ads.filter(a => slot(a) === n).forEach(a => out.push(a));
+    at(0);
+    posts.forEach((p, i) => { out.push(p); at(i + 1); });
+    ads.filter(a => slot(a) > posts.length).forEach(a => out.push(a));
+    return out;
+  }
+
   function postHTML(p) {
     const a = author(p);
-    const imgs = p.images.length ? p.images : [EMPTY_IMG];
+    const imgs = p.images.length ? p.images : [imgObj(EMPTY_IMG)];
     const liked = !!rt.liked[p.id], saved = !!rt.saved[p.id], rep = !!rt.reposted[p.id];
     const likes = bump(p.likes, liked), reposts = bump(p.reposts, rep);
     const cc = String(p.commentCount ?? '').trim() !== '' ? p.commentCount : String(p.comments.length);
     const cap = p.caption || '';
     const long = cap.length > 70 || cap.split('\n').length > 2;
     const clamp = long && !rt.expanded[p.id];
-    const ratio = { '4:5': '4/5', '1:1': '1/1', '1.91:1': '1.91/1', '3:4': '3/4' }[p.ratio] || '4/5';
+    const ratio = RATIO[p.ratio] || '4/5';
     const ring = p.author.useProfile && state.profile.storyRing ? 'ring' : '';
     const n = (v) => shown(v) ? `<span>${fmt(v)}</span>` : '';
     return `<article class="post" data-post="${p.id}">
@@ -246,17 +285,18 @@
         <button class="av-wrap ${ring}" data-act="author" data-id="${p.id}"><img class="av" src="${esc(a.avatar || DEFAULT_AVATAR)}" alt=""></button>
         <div class="who">
           <button class="uname" data-act="author" data-id="${p.id}">${esc(a.username || 'username')}${a.verified ? BADGE : ''}</button>
-          ${p.location ? `<div class="loc">${esc(p.location)}</div>` : ''}
+          ${p.ad ? '<div class="loc">Sponsored</div>' : p.location ? `<div class="loc">${esc(p.location)}</div>` : ''}
         </div>
         ${isEditing() ? `<button class="edit-pill" data-act="edit-post" data-id="${p.id}">✎ 수정</button>` : `<span class="off">${I.more}</span>`}
       </header>
       <div class="media" data-act="media" data-id="${p.id}" style="aspect-ratio:${ratio}">
-        <div class="track">${imgs.map(s => `<img src="${esc(s)}" alt="" draggable="false">`).join('')}</div>
+        <div class="track">${imgs.map(e => `<div class="slide">${imgTag(e)}</div>`).join('')}</div>
         ${imgs.length > 1 ? `<div class="count">1/${imgs.length}</div>
           <button class="nav prev hide" data-act="slide" data-dir="-1">‹</button>
           <button class="nav next" data-act="slide" data-dir="1">›</button>` : ''}
         <div class="heart-pop">${I.heartBig}</div>
       </div>
+      ${p.ad && String(p.cta || '').trim() ? `<div class="cta ${p.ctaStyle === 'blue' ? 'blue' : ''}"><span>${esc(p.cta)}</span>${I.chev}</div>` : ''}
       ${imgs.length > 1 ? `<div class="dots">${imgs.map((_, i) => `<i class="${i ? '' : 'on'}"></i>`).join('')}</div>` : ''}
       <div class="actions">
         <button class="act ${liked ? 'liked' : ''}" data-act="like" data-id="${p.id}">${I.heart}${n(likes)}</button>
@@ -268,7 +308,7 @@
       ${cap ? `<div class="caption ${clamp ? 'clamp' : ''}"><b data-act="author" data-id="${p.id}">${esc(a.username)}</b> ${rich(cap)}</div>
         ${clamp ? `<button class="more-btn" data-act="expand" data-id="${p.id}">more</button>` : ''}` : ''}
       ${shown(cc) ? `<button class="vc" data-act="comments" data-id="${p.id}">${String(cc).trim() === '1' ? 'View 1 comment' : `View all ${fmt(cc)} comments`}</button>` : ''}
-      ${(String(p.time || '').trim() || relTime(p.date)) ? `<div class="ptime">${esc(String(p.time || '').trim() || relTime(p.date))}</div>` : ''}
+      ${!p.ad && (String(p.time || '').trim() || relTime(p.date)) ? `<div class="ptime">${esc(String(p.time || '').trim() || relTime(p.date))}</div>` : ''}
     </article>`;
   }
 
@@ -283,7 +323,7 @@
       `<div class="hl-i"><div class="hl-c"><img src="${esc(x.image || EMPTY_IMG)}" alt=""></div><span>${esc(x.title)}</span></div>`).join('')}</div>` : '';
     const grid = posts.length
       ? `<div class="grid">${posts.map(p => `<button class="cell" data-act="open-post" data-id="${p.id}">
-          <img src="${esc(p.images[0] || EMPTY_IMG)}" alt="" loading="lazy">${p.images.length > 1 ? I.multi : ''}</button>`).join('')}</div>`
+          ${imgTag(p.images[0] || EMPTY_IMG, 'loading="lazy"')}${p.images.length > 1 ? I.multi : ''}</button>`).join('')}</div>`
       : `<div class="empty">No posts yet</div>`;
     return `<header class="topbar">
         <div class="ptitle">${pr.private ? I.lock : ''}${esc(pr.username)}${pr.verified ? BADGE : ''}</div>
@@ -394,7 +434,7 @@
       }
       case 'open-post': view = { page: 'detail', postId: id }; render(); break;
       case 'follow': rt.followed = !rt.followed; render(); break;
-      case 'edit-post': openPostEditor(id); break;
+      case 'edit-post': find(id)?.ad ? openAdEditor(id) : openPostEditor(id); break;
       case 'new-post': if (isEditing()) openPostEditor(null); break;
       case 'edit-profile': openProfileEditor(); break;
     }
@@ -457,8 +497,8 @@
     i.checked = !!o[k];
     return h('label', { class: 'chk' }, i, label);
   }
-  function select(o, k, opts) {
-    const s = h('select', { onchange: e => { o[k] = e.target.value; } }, opts.map(([v, l]) => h('option', { value: v }, l)));
+  function select(o, k, opts, after) {
+    const s = h('select', { onchange: e => { o[k] = e.target.value; after && after(); } }, opts.map(([v, l]) => h('option', { value: v }, l)));
     s.value = o[k];
     return s;
   }
@@ -473,7 +513,7 @@
   }
   function move(arr, i, dir) { const j = i + dir; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; }
 
-  function readImage(file, max = 1080) {
+  function readImage(file, max = 1440) {
     return new Promise((res, rej) => {
       const fr = new FileReader();
       fr.onload = () => {
@@ -512,34 +552,104 @@
           btn('지우기', () => { o[k] = ''; url.value = ''; prev.src = round ? DEFAULT_AVATAR : EMPTY_IMG; })), file));
   }
 
-  // 게시물 사진 여러 장
+  // 게시물 사진 여러 장 (추가하면 바로 영역 조정 창이 열림)
   function imagesEditor(d) {
     const list = h('div', { class: 'thumbs' });
     const draw = () => {
       list.innerHTML = '';
       if (!d.images.length) list.append(h('div', { class: 'note' }, '아직 사진이 없어요. 아래에서 추가하세요.'));
-      d.images.forEach((s, i) => list.append(h('div', { class: 'thumb' },
-        h('img', { src: s }), h('span', { class: 'tn' }, String(i + 1)),
-        h('div', { class: 'tbs' },
-          btn('◀', () => { move(d.images, i, -1); draw(); }),
-          btn('✕', () => { d.images.splice(i, 1); draw(); }, 'danger'),
-          btn('▶', () => { move(d.images, i, 1); draw(); })))));
+      d.images.forEach((e, i) => {
+        const fr = h('div', { class: 'tframe', style: `aspect-ratio:${RATIO[d.ratio] || '4/5'}`, title: '눌러서 영역 조정' });
+        fr.innerHTML = imgTag(e);
+        fr.addEventListener('click', async () => { await cropImage(e, d.ratio); draw(); });
+        list.append(h('div', { class: 'thumb' }, fr, h('span', { class: 'tn' }, String(i + 1)),
+          h('div', { class: 'tbs' },
+            btn('◀', () => { move(d.images, i, -1); draw(); }),
+            btn('✂', async () => { await cropImage(e, d.ratio); draw(); }),
+            btn('✕', () => { d.images.splice(i, 1); draw(); }, 'danger'),
+            btn('▶', () => { move(d.images, i, 1); draw(); }))));
+      });
+    };
+    const addAndCrop = async objs => {
+      d.images.push(...objs); draw();
+      for (const o of objs) { await cropImage(o, d.ratio); draw(); }
     };
     const file = h('input', {
       type: 'file', accept: 'image/*', multiple: true, hidden: true, onchange: async e => {
+        const objs = [];
         for (const f of [...e.target.files]) {
-          try { d.images.push(await readImage(f)); } catch { toast('이미지를 읽지 못했어요: ' + f.name); }
+          try { objs.push(imgObj(await readImage(f))); } catch { toast('이미지를 읽지 못했어요: ' + f.name); }
         }
-        e.target.value = ''; draw();
+        e.target.value = '';
+        addAndCrop(objs);
       }
     });
     const url = h('input', { type: 'text', placeholder: '이미지 주소 붙여넣기 (https://… 또는 images/파일.jpg)' });
     draw();
+    imagesEditor.redraw = draw;
     return h('div', {}, list,
+      h('p', { class: 'note' }, '사진을 누르거나 ✂를 누르면 보이는 영역을 다시 정할 수 있어요.'),
       h('div', { class: 'row' }, btn('＋ 파일에서 사진 추가 (여러 장 가능)', () => file.click()), file),
       h('div', { class: 'row' }, url, btn('링크로 추가', () => {
-        const v = url.value.trim(); if (v) { d.images.push(v); url.value = ''; draw(); }
+        const v = url.value.trim(); if (v) { url.value = ''; addAndCrop([imgObj(v)]); }
       })));
+  }
+
+  // 영역 조정 창: 드래그로 위치, 슬라이더·휠·두 손가락으로 확대
+  function cropImage(o, ratioKey) {
+    return new Promise(resolve => {
+      const ar = RATIO[ratioKey] || '4/5';
+      const [rw, rh] = ar.split('/').map(Number);
+      const st = { x: o.x, y: o.y, z: o.z };
+      const img = h('img', { src: o.src || EMPTY_IMG, draggable: 'false', alt: '' });
+      const frame = h('div', { class: 'crop-frame', style: `aspect-ratio:${ar};width:min(100%, calc(58vh * ${rw / rh}))` },
+        img, h('div', { class: 'crop-grid' }));
+      const zoom = h('input', { type: 'range', min: '1', max: '4', step: '0.01', class: 'crop-zoom',
+        oninput: e => { st.z = Number(e.target.value); apply(); } });
+      const apply = () => { img.setAttribute('style', cropStyle(st)); zoom.value = String(st.z); };
+      apply();
+
+      const pts = new Map(); let pinch = null;
+      const dist = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y) || 1; };
+      frame.addEventListener('pointerdown', e => {
+        e.preventDefault(); frame.setPointerCapture(e.pointerId);
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pts.size === 2) pinch = { d: dist(), z: st.z };
+      });
+      frame.addEventListener('pointermove', e => {
+        if (!pts.has(e.pointerId)) return;
+        const prev = pts.get(e.pointerId), cur = { x: e.clientX, y: e.clientY };
+        pts.set(e.pointerId, cur);
+        if (pts.size >= 2 && pinch) { st.z = clampN(pinch.z * dist() / pinch.d, 1, 4, 1); apply(); return; }
+        const fw = frame.clientWidth, fh = frame.clientHeight;
+        const iw = img.naturalWidth || fw, ih = img.naturalHeight || fh;
+        const sc = Math.max(fw / iw, fh / ih), W = iw * sc, H = ih * sc;
+        const denX = fw - st.z * W, denY = fh - st.z * H;
+        if (Math.abs(denX) > 0.5) st.x = clampN(st.x + (cur.x - prev.x) * 100 / denX, 0, 100, 50);
+        if (Math.abs(denY) > 0.5) st.y = clampN(st.y + (cur.y - prev.y) * 100 / denY, 0, 100, 50);
+        apply();
+      });
+      const up = e => { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; };
+      frame.addEventListener('pointerup', up);
+      frame.addEventListener('pointercancel', up);
+      frame.addEventListener('wheel', e => {
+        e.preventDefault(); st.z = clampN(st.z * (e.deltaY < 0 ? 1.06 : 1 / 1.06), 1, 4, 1); apply();
+      }, { passive: false });
+
+      const el = h('div', { class: 'overlay ed crop-wrap' });
+      const finish = ok => { if (ok) Object.assign(o, st); closeOverlay(el); resolve(ok); };
+      el.append(h('div', { class: 'crop-panel' },
+        h('div', { class: 'mhead' },
+          h('button', { type: 'button', class: 'mh-btn', onclick: () => finish(false) }, '취소'),
+          h('b', {}, `보이는 영역 정하기 (${ratioKey || '4:5'})`),
+          h('button', { type: 'button', class: 'mh-btn save', onclick: () => finish(true) }, '완료')),
+        h('div', { class: 'crop-body' }, frame,
+          h('div', { class: 'crop-ctl' }, h('span', {}, '－'), zoom, h('span', {}, '＋')),
+          h('div', { class: 'row', style: 'justify-content:center' },
+            btn('가운데로 되돌리기', () => { st.x = 50; st.y = 50; st.z = 1; apply(); })),
+          h('p', { class: 'note', style: 'text-align:center' }, '사진을 끌어서 위치를 옮기고, 슬라이더(또는 두 손가락·마우스 휠)로 확대하세요.'))));
+      openOverlay(el);
+    });
   }
 
   // 댓글 목록 편집
@@ -622,7 +732,7 @@
       sec('작성자', check(d.author, 'useProfile', '내 프로필 계정으로 올리기', drawAuthor), authorBox),
       sec('게시물',
         field('사진 (◀ ▶로 순서 변경)', imagesEditor(d)),
-        field('사진 비율', select(d, 'ratio', [['4:5', '4:5 세로'], ['1:1', '1:1 정사각형'], ['3:4', '3:4 세로'], ['1.91:1', '1.91:1 가로']])),
+        field('사진 비율', select(d, 'ratio', [['4:5', '4:5 세로'], ['1:1', '1:1 정사각형'], ['3:4', '3:4 세로'], ['1.91:1', '1.91:1 가로']], () => imagesEditor.redraw && imagesEditor.redraw())),
         field('내용', area(d, 'caption', '#해시태그, @멘션은 파란색으로 표시돼요', 5)),
         field('위치', text(d, 'location', '예: 서울 성수동 (비우면 숨김)')),
         field('작성 날짜·시간', dateInput(d), '게시물은 이 날짜 기준으로 최신순 자동 정렬돼요.'),
@@ -644,6 +754,42 @@
       if (isNew) state.posts.unshift(d);
       else { const i = state.posts.findIndex(p => p.id === id); if (i >= 0) state.posts[i] = d; else state.posts.unshift(d); }
       sortPosts(); commit(); toast(isNew ? '게시물을 올렸어요' : '저장했어요');
+    });
+  }
+  /* ---------- 광고 편집 (가짜 Sponsored 게시물) ---------- */
+  function openAdEditor(id) {
+    const isNew = !id;
+    const d = isNew ? newAd() : clone(find(id));
+    let m;
+    const body = h('div', {},
+      h('p', { class: 'note', style: 'margin-top:14px' }, '피드 중간에 "Sponsored" 표시와 버튼이 붙은 광고처럼 보이는 게시물이에요. 버튼은 눌러도 아무 곳으로도 이동하지 않아요. 프로필 그리드에는 나오지 않아요.'),
+      sec('광고 계정',
+        field('브랜드 아이디', text(d.author, 'username', '예: maplehouse.co')),
+        field('브랜드 프로필 사진', imgInput(d.author, 'avatar', { round: true })),
+        check(d.author, 'verified', '인증 배지 표시')),
+      sec('광고 위치',
+        field('피드에서 몇 번째 게시물 다음에 넣을까요?', text(d, 'after', '예: 2'), '0이면 맨 위, 게시물 수보다 크면 맨 아래에 나와요.')),
+      sec('광고 내용',
+        field('사진 (◀ ▶로 순서 변경)', imagesEditor(d)),
+        field('사진 비율', select(d, 'ratio', [['4:5', '4:5 세로'], ['1:1', '1:1 정사각형'], ['3:4', '3:4 세로'], ['1.91:1', '1.91:1 가로']], () => imagesEditor.redraw && imagesEditor.redraw())),
+        field('내용', area(d, 'caption', '예: Hand-poured candles for slow evenings 🕯️', 4)),
+        field('버튼 문구', text(d, 'cta', 'Learn more / Shop now / Sign up / Install now'), '비우면 버튼을 숨겨요.'),
+        field('버튼 모양', select(d, 'ctaStyle', [['plain', '기본 (흰 바탕)'], ['blue', '파란색 강조']]))),
+      sec('반응 수',
+        h('div', { class: 'grid2' },
+          field('좋아요', text(d, 'likes', '0')),
+          field('댓글 수', text(d, 'commentCount', '비우면 실제 댓글 개수')),
+          field('리포스트', text(d, 'reposts', '0')),
+          field('공유', text(d, 'shares', '0')))),
+      sec('댓글', commentsEditor(d)),
+      !isNew && sec('삭제',
+        h('div', { class: 'row' }, confirmBtn('이 광고 삭제', () => {
+          state.ads = state.ads.filter(a => a.id !== id); commit(); closeOverlay(m); toast('삭제했어요');
+        }))));
+    m = modal(isNew ? '광고 추가' : '광고 수정', body, () => {
+      if (isNew) state.ads.push(d);
+      else { const i = state.ads.findIndex(a => a.id === id); if (i >= 0) state.ads[i] = d; else state.ads.push(d); }
+      commit(); toast(isNew ? '광고를 넣었어요' : '저장했어요');
     });
   }
   function dateInput(d) {
@@ -707,6 +853,7 @@
       ? `<span class="tb-label">미리보기 중</span><button class="tb-main" data-tb="preview">✏️ 편집으로 돌아가기</button>`
       : `<span class="tb-label">편집 모드</span>
          <button class="tb-main" data-tb="new">＋ 새 게시물</button>
+         <button data-tb="ad">📢 광고 추가</button>
          <button data-tb="profile">👤 프로필·설정</button>
          <button data-tb="preview">👁 미리보기</button>
          <button data-tb="export">⬇ 내보내기</button>
@@ -719,6 +866,7 @@
     switch (b.dataset.tb) {
       case 'preview': preview = !preview; render(); break;
       case 'new': openPostEditor(null); break;
+      case 'ad': openAdEditor(null); break;
       case 'profile': openProfileEditor(); break;
       case 'export': exportData(); break;
       case 'import': importData(); break;
